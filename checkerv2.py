@@ -100,9 +100,7 @@ try:
 
                 send_to_discord(msg)
 
-            else:
-                time.sleep(0.1)
-        time.sleep(1)
+        time.sleep(0.1)  # Delay after every 10 keys checked
 
 except KeyboardInterrupt:
     print("\nStopped by user.")
