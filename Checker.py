@@ -40,4 +40,16 @@ try:
         for _ in range(10):  # check 10 keys per loop
             priv_key = generate_private_key()
             address = private_key_to_address(priv_key)
-            balance =
+            balance = check_balance(address)
+            if balance > 0:
+                print(f"\n*** Found balance! ***")
+                print(f"Address: {address}")
+                print(f"Private Key: 0x{priv_key}")
+                print(f"Balance: {balance} ETH\n")
+                with open("keys.txt", "a") as f:
+                    f.write(f"{address} : 0x{priv_key} : {balance} ETH\n")
+            else:
+                print(f"Checked {address} - 0 ETH")
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("\nStopped by user.")
