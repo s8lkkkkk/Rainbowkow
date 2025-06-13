@@ -3,7 +3,7 @@ import requests
 import time
 import hashlib
 from ecdsa import SigningKey, SECP256k1
-import base58
+import json
 
 ALCHEMY_API_KEY = "kXg5eHzREfbkY0c7uxkdGOIRnjxHqby-"
 ALCHEMY_URL = f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
@@ -21,9 +21,14 @@ def private_key_to_address(private_key_hex):
     return address
 
 def check_balance(address):
-    url = f"{ALCHEMY_URL}/getBalance?address={address}&tag=latest"
-    headers = {"accept": "application/json"}
-    response = requests.get(url, headers=headers)
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "jsonrpc":"2.0",
+        "method":"eth_getBalance",
+        "params":[address, "latest"],
+        "id":1
+    }
+    response = requests.post(ALCHEMY_URL, headers=headers, data=json.dumps(data))
     if response.status_code == 200:
         result = response.json()
         wei = int(result.get("result", "0x0"), 16)
@@ -32,18 +37,7 @@ def check_balance(address):
 
 try:
     while True:
-        priv_key = generate_private_key()
-        address = private_key_to_address(priv_key)
-        balance = check_balance(address)
-        if balance > 0:
-            print(f"\n*** Found balance! ***")
-            print(f"Address: {address}")
-            print(f"Private Key: 0x{priv_key}")
-            print(f"Balance: {balance} ETH\n")
-            with open("keys.txt", "a") as f:
-                f.write(f"{address} : 0x{priv_key} : {balance} ETH\n")
-        else:
-            print(f"Checked {address} - 0 ETH")
-        time.sleep(1)
-except KeyboardInterrupt:
-    print("\nStopped by user.")
+        for _ in range(10):  # check 10 keys per loop
+            priv_key = generate_private_key()
+            address = private_key_to_address(priv_key)
+            balance =
