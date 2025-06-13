@@ -8,14 +8,14 @@ def check_cookie(cookie):
     }
 
     try:
-        res = requests.get("https://auth.roblox.com/v1/account/info", headers=headers)
-        if res.status_code == 200:
-            user = res.json()
+        response = requests.get("https://auth.roblox.com/v1/account/info", headers=headers)
+        if response.status_code == 200:
+            user = response.json()
             print(f"[VALID] Username: {user['username']} | User ID: {user['id']}")
             print(f"Cookie: {cookie}\n")
             return True
         else:
-            print(f"[INVALID] Cookie is not valid. Status code: {res.status_code}\n")
+            print(f"[INVALID] Cookie is not valid. Status code: {response.status_code}\n")
             return False
     except Exception as e:
         print(f"[ERROR] {str(e)}\n")
@@ -31,4 +31,4 @@ def check_cookies_from_file(filename):
         print(f"[ERROR] File '{filename}' not found.")
 
 if __name__ == "__main__":
-    check_cookies_from_file("cookies.txt
+    check_cookies_from_file("cookies.txt")
