@@ -1,4 +1,4 @@
-pkg update -y && pkg install python -y && pip install requests && echo 'import requests
+import requests
 
 def check_cookie(cookie):
     headers = {
