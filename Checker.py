@@ -1,40 +1,49 @@
 import secrets
-from web3 import Web3
+import requests
 import time
+import hashlib
+from ecdsa import SigningKey, SECP256k1
+import base58
 
-# Setup your Alchemy URL
-alchemy_url = "https://eth-mainnet.g.alchemy.com/v2/kXg5eHzREfbkY0c7uxkdGOIRnjxHqby-"  # Replace this
-web3 = Web3(Web3.HTTPProvider(alchemy_url))
-
-if not web3.isConnected():
-    print("Failed to connect to Ethereum network.")
-    exit()
+ALCHEMY_API_KEY = "kXg5eHzREfbkY0c7uxkdGOIRnjxHqby-"
+ALCHEMY_URL = f"https://eth-mainnet.g.alchemy.com/v2/{ALCHEMY_API_KEY}"
 
 def generate_private_key():
-    return "0x" + secrets.token_hex(32)
+    return secrets.token_hex(32)
 
-def private_key_to_address(private_key):
-    acct = web3.eth.account.from_key(private_key)
-    return acct.address
+def private_key_to_address(private_key_hex):
+    private_key_bytes = bytes.fromhex(private_key_hex)
+    sk = SigningKey.from_string(private_key_bytes, curve=SECP256k1)
+    vk = sk.verifying_key
+    pub_key = b'\x04' + vk.to_string()
+    keccak_hash = hashlib.new('sha3_256', pub_key).digest()
+    address = "0x" + keccak_hash[-20:].hex()
+    return address
 
 def check_balance(address):
-    balance_wei = web3.eth.get_balance(address)
-    return web3.fromWei(balance_wei, 'ether')
+    url = f"{ALCHEMY_URL}/getBalance?address={address}&tag=latest"
+    headers = {"accept": "application/json"}
+    response = requests.get(url, headers=headers)
+    if response.status_code == 200:
+        result = response.json()
+        wei = int(result.get("result", "0x0"), 16)
+        return wei / (10 ** 18)
+    return 0
 
 try:
     while True:
         priv_key = generate_private_key()
-        addr = private_key_to_address(priv_key)
-        balance = check_balance(addr)
+        address = private_key_to_address(priv_key)
+        balance = check_balance(address)
         if balance > 0:
-            print(f"\n*** Found wallet with balance! ***")
-            print(f"Address: {addr}")
-            print(f"Private Key: {priv_key}")
+            print(f"\n*** Found balance! ***")
+            print(f"Address: {address}")
+            print(f"Private Key: 0x{priv_key}")
             print(f"Balance: {balance} ETH\n")
+            with open("keys.txt", "a") as f:
+                f.write(f"{address} : 0x{priv_key} : {balance} ETH\n")
         else:
-            print(f"Checked {addr} - balance is zero.")
-        
-        time.sleep(1)  # 1 second delay between checks
-
+            print(f"Checked {address} - 0 ETH")
+        time.sleep(1)
 except KeyboardInterrupt:
     print("\nStopped by user.")
