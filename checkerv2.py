@@ -1,9 +1,9 @@
 import secrets
 import requests
-import time
 import hashlib
 from ecdsa import SigningKey, SECP256k1
 import json
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # RPC endpoints
 RPC_ENDPOINTS = {
@@ -27,7 +27,7 @@ def private_key_to_address(private_key_hex):
     address = "0x" + keccak_hash[-20:].hex()
     return address
 
-def check_balance(address, chain, rpc_url):
+def check_balance(address, private_key, chain, rpc_url):
     headers = {"Content-Type": "application/json"}
     data = {
         "jsonrpc": "2.0",
@@ -36,37 +36,38 @@ def check_balance(address, chain, rpc_url):
         "id": 1
     }
     try:
-        response = requests.post(rpc_url, headers=headers, data=json.dumps(data), timeout=10)
+        response = requests.post(rpc_url, headers=headers, data=json.dumps(data), timeout=8)
         result = response.json()
         wei = int(result.get("result", "0x0"), 16)
-        return wei / 10**18
+        eth_value = wei / 10**18
+        if eth_value > 0:
+            print(f"\n*** {chain} balance found! ***")
+            print(f"Address: {address}")
+            print(f"Private Key: 0x{private_key}")
+            print(f"Balance: {eth_value} {chain}\n")
+            with open("keys.txt", "a") as f:
+                f.write(f"{chain} | {address} : 0x{private_key} : {eth_value} {chain}\n")
+        else:
+            print(f"{chain} | Checked {address} - 0")
     except Exception as e:
-        print(f"Error on {chain} for {address}: {e}")
-        return 0
+        print(f"{chain} | Error checking {address}: {e}")
 
+def scan_wallet():
+    priv_key = generate_private_key()
+    address = private_key_to_address(priv_key)
+
+    with ThreadPoolExecutor(max_workers=len(RPC_ENDPOINTS)) as executor:
+        futures = []
+        for chain, rpc in RPC_ENDPOINTS.items():
+            futures.append(executor.submit(check_balance, address, priv_key, chain, rpc))
+        for _ in as_completed(futures):
+            pass  # just wait for all threads to finish
+
+# Main loop
 try:
+    print("Starting wallet scan (fast mode)...")
     while True:
-        for _ in range(10):  # Generate and check 10 keys
-            priv_key = generate_private_key()
-            address = private_key_to_address(priv_key)
-            found = False
-
-            for chain, rpc_url in RPC_ENDPOINTS.items():
-                balance = check_balance(address, chain, rpc_url)
-                if balance > 0:
-                    print(f"\n*** {chain} balance found! ***")
-                    print(f"Address: {address}")
-                    print(f"Private Key: 0x{priv_key}")
-                    print(f"Balance: {balance} {chain}\n")
-                    with open("keys.txt", "a") as f:
-                        f.write(f"{chain} | {address} : 0x{priv_key} : {balance} {chain}\n")
-                    found = True
-                else:
-                    print(f"{chain} | Checked {address} - 0")
-
-            if not found:
-                time.sleep(0.1)
-        time.sleep(1)
-
+        with ThreadPoolExecutor(max_workers=10) as executor:  # 10 parallel wallet scans
+            executor.map(lambda _: scan_wallet(), range(10))
 except KeyboardInterrupt:
     print("\nStopped by user.")
