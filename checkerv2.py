@@ -7,7 +7,36 @@ import json
 from ecdsa import SigningKey, SECP256k1
 from concurrent.futures import ThreadPoolExecutor
 
-# Show red banner at top
+# Prompt for webhook and test it
+def get_webhook_url():
+    url = input("🔗 Enter your Discord Webhook URL: ").strip()
+    if not url.startswith("https://discord.com/api/webhooks/"):
+        print("❌ Invalid format. Must start with 'https://discord.com/api/webhooks/'.")
+        exit()
+
+    try:
+        test_msg = {"content": "✅ Webhook connected!"}
+        response = requests.post(url, json=test_msg)
+        if response.status_code == 204:
+            print("✅ Webhook test successful.\n")
+            return url
+        else:
+            print(f"❌ Webhook test failed with status code {response.status_code}")
+            exit()
+    except Exception as e:
+        print(f"❌ Error testing webhook: {e}")
+        exit()
+
+WEBHOOK_URL = get_webhook_url()
+
+# Discord sending
+def send_to_discord(message):
+    try:
+        requests.post(WEBHOOK_URL, json={"content": message})
+    except Exception as e:
+        print(f"❌ Failed to send message: {e}")
+
+# Banner
 def print_banner():
     os.system("clear" if os.name == "posix" else "cls")
     print("\033[91m" + r"""
@@ -19,14 +48,12 @@ def print_banner():
 ╚═╝░░░░░╚═╝╚═════╝░╚═╝░░╚═╝╚══════╝░░░╚═╝░░░
 """ + "\033[0m")
 
-WEBHOOK_URL = "https://discord.com/api/webhooks/1370714262237876224/od1EsdVEJ869kBHZB7vqGqXjOM55pcaK9NbPf_J97AUY5GFnHrVsRVcO-qB0oXY_012a"
-
 # Colors
 RED = "\033[91m"
 GREEN = "\033[92m"
 RESET = "\033[0m"
 
-# Alchemy API key for ETH (already in use below)
+# RPC endpoints
 RPC_ENDPOINTS = {
     "ETH": "https://eth-mainnet.g.alchemy.com/v2/kXg5eHzREfbkY0c7uxkdGOIRnjxHqby-",
     "POLYGON": "https://polygon-rpc.com",
@@ -36,6 +63,7 @@ RPC_ENDPOINTS = {
     "AVAX": "https://api.avax.network/ext/bc/C/rpc"
 }
 
+# Wallet functions
 def generate_private_key():
     return secrets.token_hex(32)
 
@@ -66,15 +94,10 @@ def check_balance(address, chain_rpc):
         wei = int(result.get("result", "0x0"), 16)
         return chain, wei / 10**18
     except Exception as e:
-        print(f"Error on {chain} for {address}: {e}")
+        print(f"❌ Error on {chain} for {address}: {e}")
         return chain, 0
 
-def send_to_discord(message):
-    try:
-        requests.post(WEBHOOK_URL, json={"content": message})
-    except Exception as e:
-        print(f"Failed to send Discord message: {e}")
-
+# Main loop
 try:
     while True:
         print_banner()
@@ -92,10 +115,10 @@ try:
                 color = GREEN if balance > 0 else RED
                 if balance > 0:
                     found = True
-                print(f"{chain} | Checked {address} - {color}{balance}{RESET}")
+                print(f"{chain} | {address} - {color}{balance:.8f}{RESET}")
 
             if found:
-                print(f"\n*** Balance found! ***")
+                print(f"\n🎯 Balance found!")
                 print(f"Address: {address}")
                 print(f"Private Key: 0x{priv_key}\n")
                 with open("keys.txt", "a") as f:
@@ -112,4 +135,4 @@ try:
         time.sleep(1)
 
 except KeyboardInterrupt:
-    print("\nStopped by user.")
+    print("\n⛔ Stopped by user.")
