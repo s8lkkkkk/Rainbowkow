@@ -1,4 +1,3 @@
-import os
 import secrets
 import requests
 import time
@@ -7,10 +6,8 @@ import json
 from ecdsa import SigningKey, SECP256k1
 from concurrent.futures import ThreadPoolExecutor
 
-# Show red banner at top
-def print_banner():
-    os.system("clear" if os.name == "posix" else "cls")
-    print("\033[91m" + r"""
+# Print red ASCII banner once at the top
+print("\033[91m" + r"""
 ███╗░░░███╗░██████╗██╗░░██╗██╗░░░░░██╗░░░██╗
 ████╗░████║██╔════╝╚██╗██╔╝██║░░░░░██║░░░██║
 ██╔████╔██║╚█████╗░░╚███╔╝░██║░░░░░╚██╗░██╔╝
@@ -19,14 +16,15 @@ def print_banner():
 ╚═╝░░░░░╚═╝╚═════╝░╚═╝░░╚═╝╚══════╝░░░╚═╝░░░
 """ + "\033[0m")
 
+# Your Discord webhook
 WEBHOOK_URL = "https://discord.com/api/webhooks/1370714262237876224/od1EsdVEJ869kBHZB7vqGqXjOM55pcaK9NbPf_J97AUY5GFnHrVsRVcO-qB0oXY_012a"
 
-# Colors
+# Text colors
 RED = "\033[91m"
 GREEN = "\033[92m"
 RESET = "\033[0m"
 
-# Alchemy API key for ETH (already in use below)
+# RPC endpoints including your Alchemy key for ETH
 RPC_ENDPOINTS = {
     "ETH": "https://eth-mainnet.g.alchemy.com/v2/kXg5eHzREfbkY0c7uxkdGOIRnjxHqby-",
     "POLYGON": "https://polygon-rpc.com",
@@ -75,11 +73,10 @@ def send_to_discord(message):
     except Exception as e:
         print(f"Failed to send Discord message: {e}")
 
+# Main loop
 try:
     while True:
-        print_banner()
-
-        for _ in range(10):
+        for _ in range(10):  # Generate and check 10 keys per batch
             priv_key = generate_private_key()
             address = private_key_to_address(priv_key)
             found = False
